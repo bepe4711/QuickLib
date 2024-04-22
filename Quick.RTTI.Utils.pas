@@ -81,6 +81,7 @@ class function TRTTI.CreateInstance<T>: T;
 begin
   Result := CreateInstance<T>([]);
 end;
+
 class function TRTTI.CreateInstance<T>(const Args: array of TValue): T;
 var
   value: TValue;
@@ -88,6 +89,7 @@ var
   rmethod: TRttiMethod;
   rinstype: TRttiInstanceType;
 begin
+  Result := Default(T);
   rtype := fCtx.GetType(TypeInfo(T));
   for rmethod in rtype.GetMethods do
   begin
@@ -100,6 +102,7 @@ begin
     end;
   end;
 end;
+
 class function TRTTI.CreateInstance(aBaseClass : TClass): TObject;
 var
   value: TValue;

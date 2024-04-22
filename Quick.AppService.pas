@@ -81,12 +81,13 @@ type
     fSvHandle : SC_HANDLE;
     fServiceName : string;
     fDisplayName : string;
+    FDescription: String;
     fLoadOrderGroup : string;
     fDependencies : string;
     fDesktopInteraction : Boolean;
     fUsername : string;
     fUserPass : string;
-    fStartType : TSvcStartType;   
+    fStartType : TSvcStartType;
     fFileName : string;
     fSilent : Boolean;
     fStatus : TSvcStatus;
@@ -96,18 +97,17 @@ type
     fOnStop : TSvcAnonMethod;
     fOnExecute : TSvcAnonMethod;
     fAfterRemove : TSvcRemoveEvent;
-    fServiceDescription : string;
     procedure ReportSvcStatus(dwCurrentState, dwWin32ExitCode, dwWaitHint: DWORD);
     procedure Execute;
     procedure Help;
     procedure DoStop;
-    procedure SetServiceDescription;
+
   public
     constructor Create;
     destructor Destroy; override;
     property ServiceName : string read fServiceName write fServiceName;
     property DisplayName : string read fDisplayName write fDisplayName;
-    property ServiceDescription : string read fServiceDescription write fServiceDescription;
+    property Description: String read FDescription write FDescription;
     property LoadOrderGroup : string read fLoadOrderGroup write fLoadOrderGroup;
     property Dependencies : string read fDependencies write fDependencies;
     property DesktopInteraction : Boolean read fDesktopInteraction write fDesktopInteraction;
@@ -126,6 +126,7 @@ type
     procedure Install;
     procedure Remove;
     procedure CheckParams;
+    procedure StartService;
     class function InstallParamsPresent : Boolean;
     class function ConsoleParamPresent : Boolean;
     class function IsRunningAsService : Boolean;
@@ -140,11 +141,6 @@ var
   AppService : TAppService;
 
 implementation
-
-{$IFDEF MSWINDOWS}
-uses
-  Registry;
-{$ENDIF}
 
 procedure ServiceCtrlHandler(Control: DWORD); stdcall;
 begin
@@ -250,25 +246,19 @@ begin
   SetServiceStatus(StatusHandle,ServiceStatus);
 end;
 
-procedure TAppService.SetServiceDescription;
-{$IFDEF MSWINDOWS}
-var
-  reg: TRegistry;
-{$ENDIF}
+procedure TAppService.StartService;
 begin
-{$IFDEF MSWINDOWS}
-  reg := TRegistry.Create(KEY_READ or KEY_WRITE);
-  try
-    reg.RootKey := HKEY_LOCAL_MACHINE;
-    if reg.OpenKey('\SYSTEM\CurrentControlSet\Services\' + fServiceName, False) then
-    begin
-      reg.WriteString('Description', fServiceDescription);
-      reg.CloseKey;
-    end;
-  finally
-    reg.Free;
-  end;
-{$ENDIF}
+  //initialize as a service
+  if Assigned(fOnInitialize) then fOnInitialize;
+  ServiceTable[0].lpServiceName := PChar(fServiceName);
+  ServiceTable[0].lpServiceProc := @RegisterService;
+  ServiceTable[1].lpServiceName := nil;
+  ServiceTable[1].lpServiceProc := nil;
+  {$IFDEF FPC}
+  StartServiceCtrlDispatcher(@ServiceTable[0]);
+  {$ELSE}
+  StartServiceCtrlDispatcher(ServiceTable[0]);
+  {$ENDIF}
 end;
 
 procedure TAppService.Execute;
@@ -319,8 +309,8 @@ begin
     ControlService(Service,SERVICE_CONTROL_STOP,ServiceStatus);
     DeleteService(Service);
     CloseServiceHandle(Service);
-    if fSilent then Writeln(Format(cRemoveMsg,[fServiceName]))
-      else MessageBox(0,cRemoveMsg,PChar(fServiceName),MB_ICONINFORMATION or MB_OK or MB_TASKMODAL or MB_TOPMOST);
+    if fSilent then Writeln(Format(cRemoveMsg,[fDisplayName]))
+      else MessageBox(0,cRemoveMsg,PChar(fDisplayName),MB_ICONINFORMATION or MB_OK or MB_TASKMODAL or MB_TOPMOST);
   finally
     CloseServiceHandle(SCManager);
     if Assigned(fAfterRemove) then fAfterRemove;
@@ -333,11 +323,11 @@ const
   cSCMError = 'Error trying to open SC Manager (you need admin permissions)';
 var
   servicetype : Cardinal;
-  starttype : Cardinal;
   svcloadgroup : PChar;
   svcdependencies : PChar;
   svcusername : PChar;
   svcuserpass : PChar;
+  tmpDescription: SERVICE_DESCRIPTION;
 begin
   fSCMHandle := OpenSCManager(nil,nil,SC_MANAGER_ALL_ACCESS);
 
@@ -377,13 +367,13 @@ begin
                               svcusername, //user
                               svcuserpass); //password
 
-  if Length(fServiceDescription) > 0 then
-    SetServiceDescription;
-
   if fSvHandle <> 0 then
   begin
-    if fSilent then Writeln(Format(cInstallMsg,[fServiceName]))
-      else MessageBox(0,cInstallMsg,PChar(fServiceName),MB_ICONINFORMATION or MB_OK or MB_TASKMODAL or MB_TOPMOST);
+    tmpDescription.lpDescription := PChar(FDescription);
+    ChangeServiceConfig2(fSvHandle, SERVICE_CONFIG_DESCRIPTION, @tmpDescription);
+
+    if fSilent then Writeln(Format(cInstallMsg,[fDisplayName]))
+      else MessageBox(0,cInstallMsg,PChar(fDisplayName),MB_ICONINFORMATION or MB_OK or MB_TASKMODAL or MB_TOPMOST);
   end;
 end;
 
@@ -436,17 +426,7 @@ begin
   end
   else
   begin
-    //initialize as a service
-    if Assigned(fOnInitialize) then fOnInitialize;
-    ServiceTable[0].lpServiceName := PChar(fServiceName);
-    ServiceTable[0].lpServiceProc := @RegisterService;
-    ServiceTable[1].lpServiceName := nil;
-    ServiceTable[1].lpServiceProc := nil;
-    {$IFDEF FPC}
-    StartServiceCtrlDispatcher(@ServiceTable[0]);
-    {$ELSE}
-    StartServiceCtrlDispatcher(ServiceTable[0]);
-    {$ENDIF}
+    StartService;
   end;
 end;
 
